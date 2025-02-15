@@ -2,7 +2,8 @@ use chrono::{NaiveDateTime, Utc};
 use dotenv::dotenv;
 use reqwest::Client;
 use serde::Deserialize;
-use std::{env, fmt::format};
+use std::{env, time::Duration};
+use tokio::time::sleep;
 use twitch_irc::login::StaticLoginCredentials;
 use twitch_irc::{ClientConfig, SecureTCPTransport, TwitchIRCClient};
 
@@ -33,13 +34,31 @@ async fn main() {
     let username = env::var("TWITCH_USERNAME").expect("TWITCH_USERNAME not found");
     let message = env::var("TWITCH_MESSAGE").expect("TWITCH_MESSAGE not found");
 
-    // Check if the streamer is live
-    let is_live = check_streamer_status(&client_id, &oauth_token, &streamer_name).await;
+    let mut already_live = false; // Flag to track when the streamer goes live
+    let mut count = 0;
 
-    if is_live {
-        if !message.is_empty() {
-            send_message_to_chat(&username, &oauth_token, &streamer_name, &message).await;
+    loop {
+        let is_live = check_streamer_status(&client_id, &oauth_token, &streamer_name).await;
+        count += 1;
+
+        if is_live && !already_live {
+            already_live = true; // Mark that we detected the stream is live
+
+            if !message.is_empty() {
+                println!("Sending message...");
+                send_message_to_chat(&username, &oauth_token, &streamer_name, &message).await;
+                println!("✅ Message sent! Exiting...");
+                break; // Exit after sending the message
+            } else {
+                // TODO: доделать тут чтобы был постоянный конекшн если нету сообщения и я видел чужие типо в чате.
+                println!("⚠️ Stream is LIVE, but no message is set. Skipping message send.");
+            }
+        } else if !is_live {
+            already_live = false; // Reset flag if the streamer is offline
         }
+
+        print!("Request №: {} ", count);
+        sleep(Duration::from_millis(500)).await; // Wait 500ms before next check
     }
 }
 
@@ -70,6 +89,12 @@ async fn check_streamer_status(client_id: &str, oauth_token: &str, streamer_name
             // Deserialize the body to your StreamData struct
             if status.is_success() {
                 if let Ok(stream_data) = serde_json::from_str::<StreamData>(&body) {
+                    // ✅ Check if `data` is empty before accessing `data[0]`
+                    if stream_data.data.is_empty() {
+                        println!("📴 Stream is OFFLINE.");
+                        return false; // Stream is offline
+                    }
+
                     let stream_info = &stream_data.data[0];
 
                     //Format time into more readable format
