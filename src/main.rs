@@ -1,7 +1,10 @@
 use chrono::{NaiveDateTime, Utc};
 use dotenv::dotenv;
 use reqwest::Client;
+use rodio::{source::Source, Decoder, OutputStream};
 use serde::Deserialize;
+use std::fs::File;
+use std::io::BufReader;
 use std::{env, time::Duration};
 use tokio::time::sleep;
 use twitch_irc::login::StaticLoginCredentials;
@@ -45,6 +48,17 @@ async fn main() {
             already_live = true; // Mark that we detected the stream is live
 
             if !message.is_empty() {
+                // TODO: Added simple sound when stream went Live and sent message
+                // Get an output stream handle to the default physical sound device.
+                // Note that no sound will be played if _stream is dropped
+                let (_stream, stream_handle) = OutputStream::try_default().unwrap();
+                // Load a sound from a file, using a path relative to Cargo.toml
+                let file = BufReader::new(File::open("examples/music.ogg").unwrap());
+                // Decode that sound file into a source
+                let source = Decoder::new(file).unwrap();
+                // Play the sound directly on the device
+                stream_handle.play_raw(source.convert_samples());
+
                 println!("Sending message...");
                 send_message_to_chat(&username, &oauth_token, &streamer_name, &message).await;
                 println!("✅ Message sent! Exiting...");
